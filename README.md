@@ -1,6 +1,6 @@
 # Nebo Rust SDK
 
-Official Rust SDK for building [Nebo](https://nebo.bot) apps.
+Official Rust SDK for building [Nebo](https://neboloop.com) apps.
 
 ## Install
 
@@ -55,4 +55,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Documentation
 
-See [Creating Nebo Apps](https://developer.neboloop.com/docs/creating-apps) for the full guide.
+See [Creating Nebo Apps](https://neboloop.com/developers) for the full guide.
