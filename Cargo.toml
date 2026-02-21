@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Official Rust SDK for building Nebo apps"
 license = "MIT"
-repository = "https://github.com/nebolabs/nebo-sdk-rust"
+repository = "https://github.com/NeboLoop/nebo-sdk-rust"
 keywords = ["nebo", "grpc", "agent", "sdk"]
 
 [dependencies]

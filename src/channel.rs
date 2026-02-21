@@ -6,12 +6,44 @@ use crate::env::AppEnv;
 use crate::error::NeboError;
 use crate::pb;
 
-/// An inbound message from an external platform.
-#[derive(Debug, Clone)]
-pub struct InboundMessage {
+/// Identifies who sent a message.
+#[derive(Debug, Clone, Default)]
+pub struct MessageSender {
+    pub name: String,
+    pub role: String,
+    pub bot_id: String,
+}
+
+/// A file or media attachment.
+#[derive(Debug, Clone, Default)]
+pub struct Attachment {
+    pub r#type: String,
+    pub url: String,
+    pub filename: String,
+    pub size: i64,
+}
+
+/// An interactive element (button, keyboard row).
+#[derive(Debug, Clone, Default)]
+pub struct MessageAction {
+    pub label: String,
+    pub callback_id: String,
+}
+
+/// Channel message envelope used for both sending and receiving.
+#[derive(Debug, Clone, Default)]
+pub struct ChannelEnvelope {
+    pub message_id: String,
     pub channel_id: String,
-    pub user_id: String,
+    pub sender: MessageSender,
     pub text: String,
+    pub attachments: Vec<Attachment>,
+    pub reply_to: String,
+    pub actions: Vec<MessageAction>,
+    pub platform_data: Vec<u8>,
+    pub timestamp: String,
+    // Legacy fields
+    pub user_id: String,
     pub metadata: String,
 }
 
@@ -21,8 +53,9 @@ pub trait ChannelHandler: Send + Sync + 'static {
     fn id(&self) -> &str;
     async fn connect(&self, config: std::collections::HashMap<String, String>) -> Result<(), NeboError>;
     async fn disconnect(&self) -> Result<(), NeboError>;
-    async fn send(&self, channel_id: &str, text: &str) -> Result<(), NeboError>;
-    async fn receive(&self) -> Result<mpsc::Receiver<InboundMessage>, NeboError>;
+    /// Send a message. Returns the platform-assigned message ID.
+    async fn send(&self, env: ChannelEnvelope) -> Result<String, NeboError>;
+    async fn receive(&self) -> Result<mpsc::Receiver<ChannelEnvelope>, NeboError>;
 }
 
 pub(crate) struct ChannelBridge {
@@ -86,12 +119,40 @@ impl pb::channel_service_server::ChannelService for ChannelBridge {
         req: Request<pb::ChannelSendRequest>,
     ) -> Result<Response<pb::ChannelSendResponse>, Status> {
         let inner = req.into_inner();
-        match self.handler.send(&inner.channel_id, &inner.text).await {
-            Ok(()) => Ok(Response::new(pb::ChannelSendResponse {
+        let sender = inner.sender.map(|s| MessageSender {
+            name: s.name,
+            role: s.role,
+            bot_id: s.bot_id,
+        }).unwrap_or_default();
+
+        let env = ChannelEnvelope {
+            message_id: inner.message_id,
+            channel_id: inner.channel_id,
+            sender,
+            text: inner.text,
+            attachments: inner.attachments.into_iter().map(|a| Attachment {
+                r#type: a.r#type,
+                url: a.url,
+                filename: a.filename,
+                size: a.size,
+            }).collect(),
+            reply_to: inner.reply_to,
+            actions: inner.actions.into_iter().map(|a| MessageAction {
+                label: a.label,
+                callback_id: a.callback_id,
+            }).collect(),
+            platform_data: inner.platform_data,
+            ..Default::default()
+        };
+
+        match self.handler.send(env).await {
+            Ok(message_id) => Ok(Response::new(pb::ChannelSendResponse {
                 error: String::new(),
+                message_id,
             })),
             Err(e) => Ok(Response::new(pb::ChannelSendResponse {
                 error: e.to_string(),
+                message_id: String::new(),
             })),
         }
     }
@@ -116,6 +177,25 @@ impl pb::channel_service_server::ChannelService for ChannelBridge {
                     user_id: msg.user_id,
                     text: msg.text,
                     metadata: msg.metadata,
+                    message_id: msg.message_id,
+                    sender: Some(pb::MessageSender {
+                        name: msg.sender.name,
+                        role: msg.sender.role,
+                        bot_id: msg.sender.bot_id,
+                    }),
+                    attachments: msg.attachments.into_iter().map(|a| pb::Attachment {
+                        r#type: a.r#type,
+                        url: a.url,
+                        filename: a.filename,
+                        size: a.size,
+                    }).collect(),
+                    reply_to: msg.reply_to,
+                    actions: msg.actions.into_iter().map(|a| pb::MessageAction {
+                        label: a.label,
+                        callback_id: a.callback_id,
+                    }).collect(),
+                    platform_data: msg.platform_data,
+                    timestamp: msg.timestamp,
                 };
                 if tx.send(Ok(proto_msg)).await.is_err() {
                     break;
